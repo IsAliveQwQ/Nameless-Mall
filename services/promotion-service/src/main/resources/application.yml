@@ -1,0 +1,24 @@
+# ============================================
+# promotion-service - 本地最小配置
+# ============================================
+
+spring:
+  application:
+    name: promotion-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:promotion-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml
+
+  redis:
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    database: ${REDIS_DATABASE:0}

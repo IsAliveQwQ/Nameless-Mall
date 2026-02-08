@@ -1,0 +1,278 @@
+# =================================================================
+# == Nameless Mall CI/CD
+# == 每個服務獨立 Job，GitHub 自動並行執行
+# =================================================================
+
+name: Build and Deploy All
+
+on:
+  push:
+    branches: [ "main" ]
+    # Explicitly include backend paths to ensure triggering
+    paths:
+      - 'services/**'
+      - 'gateway/**'
+      - 'common/**'
+      - 'scripts/**'
+      - 'nacos-config/**'
+      - 'nginx/**'
+      - 'pom.xml'
+      - '.github/workflows/**'
+
+  workflow_dispatch:
+
+env:
+  REGISTRY: asd902648
+
+jobs:
+  # =================================================================
+  # 階段零：環境清理 (確保之前的熱修復不被舊快取干擾)
+  # =================================================================
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Force Purge Artifacts and Runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Step 1: Deleting all individual artifacts..."
+          gh api repos/${{ github.repository }}/actions/artifacts --paginate --jq '.artifacts[].id' > art_ids.txt || echo ""
+          
+          if [ -s art_ids.txt ]; then
+            echo "Found $(wc -l < art_ids.txt) artifacts. Deleting..."
+            while read -r id; do
+              gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$id || true
+            done < art_ids.txt
+          fi
+
+          echo "🗑️ Step 2: Deleting all old runs (Bulk purge)..."
+          gh run list --repo ${{ github.repository }} --limit 100 --json databaseId -q '.[].databaseId' > run_ids.txt
+          while read -r id; do
+            if [ "$id" != "${{ github.run_id }}" ]; then
+              gh run delete $id --repo ${{ github.repository }} || true
+            fi
+          done < run_ids.txt
+          
+          echo "✅ Quota recovery finished."
+
+  # =================================================================
+  # 階段一：後端 Matrix 構建 (Maven + Docker 一體化)
+  # 避免 Artifact 存儲配額問題
+  # =================================================================
+  maven-build:
+    needs: cleanup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            path: ./gateway
+            module: gateway
+          - service: auth-service
+            path: ./services/auth-service
+            module: services/auth-service
+          - service: user-service
+            path: ./services/user-service
+            module: services/user-service
+          - service: product-service
+            path: ./services/product-service
+            module: services/product-service
+          - service: cart-service
+            path: ./services/cart-service
+            module: services/cart-service
+          - service: order-service
+            path: ./services/order-service
+            module: services/order-service
+          - service: search-service
+            path: ./services/search-service
+            module: services/search-service
+          - service: coupon-service
+            path: ./services/coupon-service
+            module: services/coupon-service
+          - service: payment-service
+            path: ./services/payment-service
+            module: services/payment-service
+          - service: promotion-service
+            path: ./services/promotion-service
+            module: services/promotion-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Inject Auth Keys from Secrets
+        if: matrix.service == 'auth-service'
+        run: |
+          echo "${{ secrets.AUTH_PRIVATE_KEY }}" > services/auth-service/src/main/resources/private_key.pem
+          echo "${{ secrets.AUTH_PUBLIC_KEY }}" > services/auth-service/src/main/resources/public_key.pem
+
+      - name: Build ${{ matrix.service }} with Maven
+        run: |
+          # 先構建 common 依賴
+          mvn clean install -pl common/common-core -DskipTests -q
+          # 構建 API 模組 (如果存在)
+          if [ -d "services/${{ matrix.service }}-api" ]; then
+            mvn clean install -pl services/${{ matrix.service }}-api -DskipTests -q || true
+          fi
+          # 如果是 gateway，只構建 gateway
+          if [ "${{ matrix.service }}" = "gateway" ]; then
+            mvn clean package -pl gateway -DskipTests -q
+          else
+            # 構建服務本身
+            mvn clean package -pl ${{ matrix.module }} -DskipTests -q -am
+          fi
+
+      - name: Prepare JAR for Docker
+        run: |
+          mkdir -p ${{ matrix.path }}/target
+          cp ${{ matrix.path }}/target/*.jar ${{ matrix.path }}/app.jar 2>/dev/null || true
+          ls -la ${{ matrix.path }}/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.path }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+
+
+  # =================================================================
+  # 階段四：Elasticsearch 構建
+  # =================================================================
+  elasticsearch-build:
+    needs: cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Elasticsearch
+        uses: docker/build-push-action@v5
+        with:
+          context: ./elasticsearch
+          push: true
+          tags: ${{ env.REGISTRY }}/elasticsearch:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =================================================================
+  # 階段五：部署 
+  # =================================================================
+  deploy:
+    # 依賴：必須所有構建 Job 成功後才執行部署
+    needs: [cleanup, maven-build, elasticsearch-build]
+    if: always() && !contains(needs.maven-build.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync configuration
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,sql/*,nginx/*,nacos-config/*,scripts/*"
+          target: "~/mall-deployment"
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          RMQ_USERNAME: ${{ secrets.RMQ_USERNAME }}
+          RMQ_PASSWORD: ${{ secrets.RMQ_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          envs: MYSQL_ROOT_PASSWORD,DB_USER,DB_PASS,RMQ_USERNAME,RMQ_PASSWORD,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET
+        # 重要：腳本中的 secrets.AUTH_PRIVATE_KEY, AUTH_PUBLIC_KEY 僅在 build 階段用，run 階段不需要，因為已經打包進 jar
+          script: |
+            cd ~/mall-deployment
+            
+            # 生成環境變數
+            cat > .env << EOF
+            MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+            DB_USER=$DB_USER
+            DB_PASS=$DB_PASS
+            RABBITMQ_USER=$RMQ_USERNAME
+            RABBITMQ_PASS=$RMQ_PASSWORD
+            GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+            GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+            EOF
+            
+            # 1. 確保基礎鏡像已拉取
+            docker compose pull
+            
+            # 1.5 上傳 Nacos 配置 (確保 Config 不漂移)
+            echo "🔄 Updating Nacos Configs using Python script..."
+            # 確保 Python 環境裝有 requests
+            pip3 install requests --quiet
+            # 嘗試等待 Nacos 端口
+            timeout 30s bash -c 'until echo > /dev/tcp/127.0.0.1/8848; do sleep 1; done' 2>/dev/null || echo "⚠️ Nacos port check timeout"
+            python3 scripts/push_nacos_config.py --host 127.0.0.1:8848 --dir ./nacos-config
+            
+            # 2. 階段性啟動 - 降低 CPU 峰值 (Startup Storm Mitigation)
+            echo "🚀 Starting Auth Service (Batch 1)..."
+            docker compose up -d auth-service
+            sleep 30
+            
+            echo "🚀 Starting Core Services (Batch 2)..."
+            docker compose up -d user-service product-service gateway seata-server nginx cerebro
+            sleep 45
+            
+            echo "🚀 Starting Business Services (Batch 3)..."
+            docker compose up -d order-service cart-service coupon-service payment-service search-service promotion-service
+            
+            # 3. 執行資料庫補丁 (Hotfix for @TableLogic)
+            echo "🔧 Applying SQL Patches..."
+            docker exec -i mysql mysql -u root -p$MYSQL_ROOT_PASSWORD mall_order -e "ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_deleted TINYINT(1) DEFAULT 0 COMMENT '邏輯刪除' AFTER updated_at;" || echo "⚠️ Order patch skipped"
+            docker exec -i mysql mysql -u root -p$MYSQL_ROOT_PASSWORD mall_coupon -e "ALTER TABLE coupon_templates ADD COLUMN IF NOT EXISTS is_deleted TINYINT(1) DEFAULT 0 COMMENT '邏輯刪除' AFTER updated_at;" || echo "⚠️ Coupon patch skipped"
+
+            # 4. 驗證
+            echo "✅ All batches triggered and patches applied!"
+             docker ps --format "table {{.Names}}\t{{.Status}}"
+
+            
+            # 背景清理 (不阻塞部署)
+            nohup docker image prune -f > /dev/null 2>&1 &
+            
+            echo "✅ Deploy completed with staggered startup!"

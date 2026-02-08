@@ -1,0 +1,58 @@
+# auth-service.yml
+# 認證服務配置：負責 JWT 簽發、密碼驗證、OAuth2 社交登入
+
+server:
+  port: 9000
+  tomcat:
+    threads:
+      max: 100
+      min-spare: 20
+    max-connections: 2000
+    accept-count: 200
+
+spring:
+  # ==================== 資料庫連線 ====================
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:mall_auth}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASS:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: auth-hikari
+      maximum-pool-size: 40
+      minimum-idle: 20
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+
+  # ==================== OAuth2 社交登入（Google） ====================
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - openid
+              - email
+              - profile
+            # 回調給 Gateway，由 Gateway 轉發至 auth-service
+            redirect-uri: "${API_BASE_URL:https://isaliveqwq.me}/login/oauth2/code/{registrationId}"
+
+# ==================== JWT 簽發配置 ====================
+jwt:
+  private-key-path: classpath:private_key.pem  # RSA 私鑰路徑，用於簽發 JWT
+  expiration: 3600000                          # Token 有效期 1 小時 (ms)
+
+# ==================== 前端回調配置 ====================
+app:
+  frontend:
+    # OAuth2 登入成功後重導至前端的路徑，帶上 JWT Token
+    callback-url: ${FRONTEND_CALLBACK_URL:https://isaliveqwq.me/login/callback}
+
+logging:
+  level:
+    com.nameless.mall.auth: INFO

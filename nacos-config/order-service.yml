@@ -1,0 +1,121 @@
+# order-service.yml
+server:
+  port: 12000
+  tomcat:
+    threads:
+      max: 120
+      min-spare: 20
+    max-connections: 2000
+    accept-count: 200
+
+# 資料庫連線配置
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:mall_order}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Taipei&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASS:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: order-hikari
+      maximum-pool-size: 50
+      minimum-idle: 20
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+
+  # Redis 連線配置
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 10
+          max-wait: 2000ms
+
+  config:
+    import:
+      - optional:nacos:application-seata.yml
+
+  # Spring Security 資源伺服器設定
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+
+  # RabbitMQ 連線配置
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    ssl:
+      enabled: false
+    listener:
+      simple:
+        concurrency: 6
+        max-concurrency: 16
+        prefetch: 20
+
+seata:
+  enabled: false
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+       mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP
+
+
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# SpringDoc API 文件設定
+springdoc:
+  group-configs:
+    - group: order-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.order.controller
+
+# Actuator 配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+# 日誌級別配置
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.order: INFO
+    com.nameless.mall.product.api.feign: INFO
+    com.nameless.mall.cart.api.feign: INFO
+
+# 異步下單線程池配置（可透過 Nacos 熱更新）
+order:
+  async:
+    core-pool-size: 24
+    max-pool-size: 60
+    queue-capacity: 200
+  stale-order:
+    timeout-minutes: 5
+
+# feign.sentinel 由 application.yml 的 spring.cloud.sentinel.feign.enabled 統一管理

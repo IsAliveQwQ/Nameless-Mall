@@ -1,0 +1,37 @@
+# =================================================================
+# == Nameless Mall - Actions Cache Cleaner
+# == 職責：清除 GitHub Actions 殘留快取，釋放儲存空間
+# == 業界標準：定期手工清理，防止 Maven 或 Docker 快取膨脹
+# =================================================================
+
+name: Clear Actions Cache
+
+on:
+  workflow_dispatch: # 允許手動從 Actions 頁面觸發
+
+permissions:
+  actions: write # 必須擁有寫入權限才能刪除快取
+
+jobs:
+  clear-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Delete all caches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Detecting caches for repository..."
+          
+          # 獲取所有快取的清單
+          gh cache list --limit 100
+          
+          echo "🧹 Starting batch deletion of all caches..."
+          
+          # 使用 GitHub CLI 批次刪除全部快取
+          gh cache delete --all
+          
+          echo "✅ Cache cleanup completed!"

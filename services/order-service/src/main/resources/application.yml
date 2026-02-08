@@ -1,0 +1,39 @@
+# ============================================
+# order-service - 本地最小配置
+# 完整配置請見 Nacos: order-service.yml
+# ============================================
+
+spring:
+  application:
+    name: order-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:application-seata.yml
+      - optional:nacos:order-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+seata:
+  enabled: true
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+      mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP

@@ -1,0 +1,226 @@
+# ============================================
+# gateway.yml - Nacos 配置
+# ============================================
+
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      # Sentinel 網關配置
+      # https://github.com/alibaba/Sentinel/wiki/%E7%BD%91%E5%85%B3%E9%99%90%E6%B5%81
+      filter:
+        sentinel:
+          enabled: true
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_HOST:localhost}:8858
+        port: 8719
+      # 開啟數據同步 (Pull 模式預設)
+      # e.g. 針對 payment-service-route 進行限流 (QPS: 10)
+      scg:
+        fallback:
+          mode: response
+          response-status: 429
+          response-body: '{"code":"SERVICE_UNAVAILABLE","message":"系統繁忙，請稍後再試 (Sentinel Triggered)","data":null}'
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origin-patterns: "*"
+            allowed-methods:
+              - "GET"
+              - "POST"
+              - "PUT"
+              - "DELETE"
+              - "OPTIONS"
+            allowed-headers: "*"
+            allow-credentials: true
+
+      routes:
+        # ==================== 業務 API 路由 ====================
+        # [Fix] OAuth2 JWKs 優先路由 (必須在 /api/auth/** 之前)
+        - id: auth-jwks-route
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/oauth2/**
+          filters:
+            - StripPrefix=2
+
+        - id: auth-service-route
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+
+        - id: user-service-route
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**, /api/users
+          filters:
+            - StripPrefix=1
+
+        - id: product-service-route
+          uri: lb://product-service
+          predicates:
+            - Path=/api/products/**, /api/products
+          filters:
+            - StripPrefix=1
+
+        - id: cart-service-route
+          uri: lb://cart-service
+          predicates:
+            - Path=/api/cart/**, /api/cart
+          filters:
+            - StripPrefix=1
+
+        - id: order-service-route
+          uri: lb://order-service
+          predicates:
+            - Path=/api/orders/**, /api/orders
+          filters:
+            - StripPrefix=1
+
+        - id: search-service-route
+          uri: lb://search-service
+          predicates:
+            - Path=/api/search/**, /api/search
+          filters:
+            - StripPrefix=1
+
+        - id: coupon-service-route
+          uri: lb://coupon-service
+          predicates:
+            - Path=/api/coupons/**, /api/coupons
+          filters:
+            - StripPrefix=1
+
+        - id: payment-service-route
+          uri: lb://payment-service
+          predicates:
+            - Path=/api/payments/**, /api/payments
+          filters:
+            - StripPrefix=1
+
+        - id: promotion-service-route
+          uri: lb://promotion-service
+          predicates:
+            - Path=/api/promotions/**, /api/promotions
+          filters:
+            - StripPrefix=1
+
+        # ==================== OAuth2 路由 ====================
+        - id: oauth2-login-route
+          uri: lb://auth-service
+          predicates:
+            - Path=/oauth2/authorization/**
+
+        - id: oauth2-callback-route
+          uri: lb://auth-service
+          predicates:
+            - Path=/login/oauth2/code/**
+
+        # ==================== API 文件路由 ====================
+        - id: auth-api-docs-route
+          uri: lb://auth-service
+          predicates:
+            - Path=/v3/api-docs/auth-service
+          filters:
+            - RewritePath=/v3/api-docs/auth-service, /v3/api-docs
+
+        - id: user-api-docs-route
+          uri: lb://user-service
+          predicates:
+            - Path=/v3/api-docs/user-service
+          filters:
+            - RewritePath=/v3/api-docs/user-service, /v3/api-docs
+
+        - id: product-api-docs-route
+          uri: lb://product-service
+          predicates:
+            - Path=/v3/api-docs/product-service
+          filters:
+            - RewritePath=/v3/api-docs/product-service, /v3/api-docs
+
+        - id: cart-api-docs-route
+          uri: lb://cart-service
+          predicates:
+            - Path=/v3/api-docs/cart-service
+          filters:
+            - RewritePath=/v3/api-docs/cart-service, /v3/api-docs
+
+        - id: order-api-docs-route
+          uri: lb://order-service
+          predicates:
+            - Path=/v3/api-docs/order-service
+          filters:
+            - RewritePath=/v3/api-docs/order-service, /v3/api-docs
+
+        - id: search-api-docs-route
+          uri: lb://search-service
+          predicates:
+            - Path=/v3/api-docs/search-service
+          filters:
+            - RewritePath=/v3/api-docs/search-service, /v3/api-docs
+
+        - id: coupon-api-docs-route
+          uri: lb://coupon-service
+          predicates:
+            - Path=/v3/api-docs/coupon-service
+          filters:
+            - RewritePath=/v3/api-docs/coupon-service, /v3/api-docs
+
+        - id: payment-api-docs-route
+          uri: lb://payment-service
+          predicates:
+            - Path=/v3/api-docs/payment-service
+          filters:
+            - RewritePath=/v3/api-docs/payment-service, /v3/api-docs
+
+        - id: promotion-api-docs-route
+          uri: lb://promotion-service
+          predicates:
+            - Path=/v3/api-docs/promotion-service
+          filters:
+            - RewritePath=/v3/api-docs/promotion-service, /v3/api-docs
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://auth-service:9000/oauth2/jwks
+
+# jwt:
+#   public-key-path: classpath:public_key.pem
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: 認證服務 (auth-service)
+        url: /v3/api-docs/auth-service
+      - name: 使用者服務 (user-service)
+        url: /v3/api-docs/user-service
+      - name: 商品服務 (product-service)
+        url: /v3/api-docs/product-service
+      - name: 購物車服務 (cart-service)
+        url: /v3/api-docs/cart-service
+      - name: 訂單服務 (order-service)
+        url: /v3/api-docs/order-service
+      - name: 搜尋服務 (search-service)
+        url: /v3/api-docs/search-service
+      - name: 優惠券服務 (coupon-service)
+        url: /v3/api-docs/coupon-service
+      - name: 支付服務 (payment-service)
+        url: /v3/api-docs/payment-service
+      - name: 活動服務 (promotion-service)
+        url: /v3/api-docs/promotion-service
+    use-root-path: true
+
+logging:
+  level:
+    org.springframework.security: WARN

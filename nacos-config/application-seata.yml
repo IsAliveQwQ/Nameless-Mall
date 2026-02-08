@@ -1,0 +1,15 @@
+# application-seata.yml - Seata 共用配置（目前停用）
+
+seata:
+  enabled: false
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+      mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP
+
+

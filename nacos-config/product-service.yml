@@ -1,0 +1,104 @@
+# product-service.yml
+# 商品服務配置：商品 CRUD、分類、規格、庫存管理
+
+server:
+  port: 10000
+  tomcat:
+    threads:
+      max: 120
+      min-spare: 20
+    max-connections: 3000
+    accept-count: 300
+
+spring:
+  # ==================== 資料庫連線 ====================
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:mall_product}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Taipei&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASS:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: product-hikari
+      maximum-pool-size: 50
+      minimum-idle: 20
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+
+  # ==================== Redis 快取 ====================
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 20
+          min-idle: 5
+          max-wait: 2000ms
+
+  # ==================== JWT 資源保護 ====================
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+
+  # ==================== RabbitMQ 消息佇列 ====================
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    ssl:
+      enabled: false
+    listener:
+      simple:
+        concurrency: 3
+        max-concurrency: 8
+        prefetch: 10
+
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # log-impl 已移除：StdOutImpl 在高併發下嚴重影響效能
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  group-configs:
+    - group: product-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.product.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+# Seata 分散式事務配置 (Hardcoded to fix config missing issue)
+seata:
+  enabled: false
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+      mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP
+
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.product: INFO
+    org.springframework.security: WARN
+    com.alibaba.nacos: INFO

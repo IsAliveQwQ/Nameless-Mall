@@ -1,0 +1,51 @@
+# search-service.yml
+
+server:
+  port: 14000
+
+spring:
+  elasticsearch:
+    uris: http://${ELASTICSEARCH_HOST:elasticsearch}:${ELASTICSEARCH_PORT:9200}
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        concurrency: 3
+        max-concurrency: 8
+        prefetch: 10
+
+  # [Perf] syncAll 大量同步需較長 readTimeout
+  cloud:
+    openfeign:
+      client:
+        config:
+          product-service:
+            connect-timeout: 5000
+            read-timeout: 60000
+
+springdoc:
+  group-configs:
+    - group: search-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.search.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.search: INFO
