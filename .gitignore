@@ -1,0 +1,85 @@
+### Dependencies & Build ###
+**/target/
+/target/
+/node_modules/
+.pnp
+.pnp.js
+
+### IDE & OS ###
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+.DS_Store
+Thumbs.db
+*.suo
+*.sln
+*.swp
+*users.csv
+*tests/performance
+
+### Java / Spring ###
+*.class
+*.jar
+*.war
+BOOT-INF/
+META-INF/
+.mvn/
+mvnw
+mvnw.cmd
+
+### Logs & Data ###
+logs/
+*.log
+data/
+**/data/
+*.mv.db
+*.trace.db
+
+### Sensitive ###
+.env
+.env.example
+*.pem
+*.key
+*.p12
+id_rsa*
+
+# U
+
+### Global Trash ###
+*.py
+*.sh
+*.json
+*.txt
+
+
+*.md
+!README.md
+!docker-compose.yml
+!pom.xml
+!nacos-config/*.yml
+
+### AI & Agent Caches ###
+.agent/
+.gemini/
+.copilot/
+.cursor/
+.windsurf/
+.claude/
+.shared/
+
+### Temp ###
+*.bak
+*~
+*.tmp
+
+# === Exclude Frontend Repo ===
+nameless-mall-front/
+
+### Scripts & Operation Tools (High Priority Whitelist) ###
+/scripts/*
+!/scripts/fetch_logs.py
+!/scripts/fetch_auth_logs.py
+!/scripts/analyze_logs.py
+!/scripts/push_nacos_config.py

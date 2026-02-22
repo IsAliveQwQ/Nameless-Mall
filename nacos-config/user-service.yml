@@ -1,0 +1,75 @@
+# user-service.yml
+# 使用者服務配置：註冊、登入、個人資料、地址管理
+
+server:
+  port: 8081
+  tomcat:
+    threads:
+      max: 80
+      min-spare: 20
+    max-connections: 2000
+    accept-count: 200
+
+spring:
+  # ==================== 資料庫連線 ====================
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:mall_user}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Taipei&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASS:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: user-hikari
+      maximum-pool-size: 20
+      minimum-idle: 8
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+
+  # ==================== JWT 資源保護 ====================
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+  
+  # ==================== RabbitMQ 消息佇列 ====================
+  # 用於發送用戶註冊事件（通知 coupon-service 發放新用戶優惠券）
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        concurrency: 2
+        max-concurrency: 5
+        prefetch: 10
+
+springdoc:
+  group-configs:
+    - group: user-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.user.controller
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # log-impl 已移除：StdOutImpl 在高併發下嚴重影響效能
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.user: INFO

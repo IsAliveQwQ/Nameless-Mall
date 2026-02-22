@@ -1,0 +1,115 @@
+# payment-service.yml
+# 支付服務配置：支援綫界 ECPay、LINE Pay、手動轉帳/貨到付款
+
+server:
+  port: 9009
+  tomcat:
+    threads:
+      max: 40
+      min-spare: 10
+    max-connections: 2000
+    accept-count: 200
+
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:mall_payment}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Taipei&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASS:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: payment-hikari
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+  
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 3
+          max-wait: 2000ms
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        concurrency: 3
+        max-concurrency: 8
+        prefetch: 10
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+springdoc:
+  group-configs:
+    - group: payment-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.payment.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    com.nameless.mall.payment: INFO
+
+# LINE Pay
+payment:
+  # LINE Pay 配置
+  linepay:
+    enabled: true
+    sandbox: true
+    channel-id: ${LINEPAY_CHANNEL_ID:2008941166}
+    channel-secret: ${LINEPAY_CHANNEL_SECRET:ea80ed2353c69f1d68dcf2ed3b3d5a72}
+    api-url: https://sandbox-api-pay.line.me
+    
+  # 回調 URL 配置
+  callback:
+    base-url: ${PAYMENT_CALLBACK_BASE_URL:https://isaliveqwq.me/api}
+
+# 綠界 ECPay
+ecpay:
+  enabled: ${ECPAY_ENABLED:true}
+  merchant-id: ${ECPAY_MERCHANT_ID:2000132}
+  hash-key: ${ECPAY_HASH_KEY:5294y06JbISpM5x9}
+  hash-iv: ${ECPAY_HASH_IV:v77hoKGq4kWxNNIS}
+  sandbox: ${ECPAY_SANDBOX:true}
+  callback-url: ${ECPAY_CALLBACK_URL:https://isaliveqwq.me/api/payments/callback/ecpay}
+  frontend-return-url: ${ECPAY_RETURN_URL:https://isaliveqwq.me/checkout/callback}
+
+# ============================================
+# Seata 分散式事務配置 (與 order-service 對齊)
+# ============================================
+seata:
+  enabled: false
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+      mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP

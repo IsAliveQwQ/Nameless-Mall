@@ -1,0 +1,19 @@
+# ============================================
+# user-service - 本地最小配置
+# ============================================
+
+spring:
+  application:
+    name: user-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:user-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml

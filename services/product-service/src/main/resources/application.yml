@@ -1,0 +1,32 @@
+# ============================================
+# product-service - 本地最小配置
+# 完整配置請見 Nacos: product-service.yml
+# ============================================
+
+spring:
+  application:
+    name: product-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:product-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml
+
+seata:
+  enabled: true
+  tx-service-group: mall_tx_group
+  service:
+    vgroup-mapping:
+      mall_tx_group: default
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      group: SEATA_GROUP

@@ -1,0 +1,25 @@
+# ============================================
+# search-service - 本地最小配置
+# ============================================
+
+spring:
+  application:
+    name: search-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:search-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${JWK_SET_URI:http://auth-service:9000/oauth2/jwks}

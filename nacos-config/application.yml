@@ -1,0 +1,58 @@
+# application.yml - Nacos 共用配置 (updated: 2026-02-16)
+logging:
+  level:
+    root: INFO
+    com.nameless.mall: INFO
+    org.springframework.security: WARN
+    com.alibaba.nacos: WARN
+
+# Spring Security 資源伺服器配置
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+  cloud:
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_HOST:localhost}:8858
+      feign:
+        enabled: true
+    openfeign:
+      # [Perf] Apache HttpClient 5 連線池
+      httpclient:
+        max-connections: 400
+        max-connections-per-route: 100
+        hc5:
+          enabled: true
+          pool-reuse-policy: fifo
+          pool-concurrency-policy: lax
+          connection-request-timeout: 3000
+      # [Perf] GZIP 壓縮
+      compression:
+        request:
+          enabled: true
+          min-request-size: 2048
+          mime-types: text/xml,application/xml,application/json
+        response:
+          enabled: true
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+  # Jackson Global Config (V5.1 ISO-8601 Standard)
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+
+# Actuator 監控端點
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

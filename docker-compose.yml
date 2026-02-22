@@ -1,0 +1,613 @@
+# Nameless Mall - Docker Compose (v1.7)
+# 修正: Cgroup v2 / Seata healthcheck / Nginx X-Forwarded-*
+
+version: '3.8'
+
+networks:
+  microservice-net:
+    driver: bridge
+
+services:
+  # ==================== 前端與入口 (Frontend & Entrypoint) ====================
+  frontend:
+    image: asd902648/frontend-app:latest
+    container_name: frontend-app
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+  # ==================== 基礎設施服務 (Infrastructure) ====================
+  nacos:
+    # Nacos v2.3.0+ 支援 Cgroup v2
+    image: nacos/nacos-server:v2.3.0
+    container_name: nacos
+    environment:
+      - PREFER_HOST_MODE=hostname
+      - MODE=standalone
+      - NACOS_DEBUG=true
+      # 這裡設定 JVM 記憶體 (docker-compose up 會讀取這些變數)
+      - JVM_XMS=256m
+      - JVM_XMX=256m
+      # Switch back to MySQL for persistence stability
+      - SPRING_DATASOURCE_PLATFORM=mysql
+      - MYSQL_SERVICE_HOST=mysql
+      - MYSQL_SERVICE_DB_NAME=nacos_config
+      - MYSQL_SERVICE_PORT=3306
+      - MYSQL_SERVICE_USER=root
+      - MYSQL_SERVICE_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    volumes:
+      - ./data/nacos:/home/nacos/nacos/data
+    networks:
+      - microservice-net
+    restart: always
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8848/nacos/v1/ns/operator/metrics" ]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  mysql:
+    image: mysql:8.4.0
+    container_name: mysql
+    # [Perf] Hikari 池總和 ~310，Nacos 另佔 ~10 → max_connections=500
+    command: --max-connections=500 --innodb-buffer-pool-size=1536M --thread-cache-size=64
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d
+      - ./data/mysql:/var/lib/mysql
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  elasticsearch:
+    image: asd902648/elasticsearch:latest
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - ./data/elasticsearch:/usr/share/elasticsearch/data
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s" ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cerebro:
+    image: lmenezes/cerebro:0.9.4
+    container_name: cerebro
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    environment:
+      - AUTH_TYPE=basic
+      - BASIC_AUTH_USER=admin
+      - BASIC_AUTH_PWD=${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    command: -Dhttp.port=9000 -Dhttp.path=/es-admin -Dhosts.0.host=http://elasticsearch:9200 -Dhosts.0.name=Mall-ES-Cluster
+
+  seata-server:
+    # Seata v1.7.0 匹配 spring-cloud-alibaba-seata 客戶端
+    image: seataio/seata-server:1.7.0
+    container_name: seata-server
+    ports:
+      - "8091:8091"
+      - "7091:7091"
+    environment:
+      - SEATA_STORE_MODE=file
+      - SEATA_REGISTRY_TYPE=nacos
+      - SEATA_REGISTRY_NACOS_SERVER_ADDR=nacos:8848
+      - SEATA_REGISTRY_NACOS_GROUP=SEATA_GROUP
+      - SEATA_REGISTRY_NACOS_NAMESPACE=
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    depends_on:
+      nacos:
+        condition: service_healthy
+    healthcheck:
+      # 7091 根目錄避開 /healthz 401
+      test: [ "CMD", "curl", "-f", "http://localhost:7091/" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  sentinel:
+    image: bladex/sentinel-dashboard:1.8.6
+    container_name: sentinel
+    ports:
+      - "8858:8858"
+    environment:
+      - JAVA_OPTS=-Dserver.port=8858 -Dcsp.sentinel.dashboard.server=localhost:8858
+    networks:
+      - microservice-net
+    restart: always
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS}
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ==================== 核心業務服務 (Business Services) ====================
+  gateway:
+    image: asd902648/gateway:latest
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+      # 信任 Nginx X-Forwarded-* 標頭
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
+    depends_on:
+      nacos:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  auth-service:
+    image: asd902648/auth-service:latest
+    container_name: auth-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_auth
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+      # 信任 Nginx X-Forwarded-*（解決 Google OAuth2 回調錯誤）
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+    depends_on:
+      nacos:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  user-service:
+    image: asd902648/user-service:latest
+    container_name: user-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_user
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  product-service:
+    image: asd902648/product-service:latest
+    container_name: product-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_product
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      seata-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:10000/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  cart-service:
+    image: asd902648/cart-service:latest
+    container_name: cart-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+
+    depends_on:
+      nacos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      seata-server:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:11000/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
+
+  order-service:
+    image: asd902648/order-service:latest
+    container_name: order-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_order
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+
+    depends_on:
+      nacos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      seata-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:12000/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  search-service:
+    image: asd902648/search-service:latest
+    container_name: search-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:14000/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  coupon-service:
+    image: asd902648/coupon-service:latest
+    container_name: coupon-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_coupon
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      seata-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9008/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  payment-service:
+    image: asd902648/payment-service:latest
+    container_name: payment-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_payment
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - PAYMENT_RETURN_URL=https://isaliveqwq.me/checkout/callback
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      seata-server:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9009/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  promotion-service:
+    image: asd902648/promotion-service:latest
+    container_name: promotion-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_NAME=mall_promotion
+      - DB_USER=root
+      - DB_PASS=${MYSQL_ROOT_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SENTINEL_HOST=sentinel
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health
+    depends_on:
+      nacos:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservice-net
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9010/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s

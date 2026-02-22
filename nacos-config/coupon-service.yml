@@ -1,0 +1,99 @@
+# coupon-service.yml
+# 優惠券服務配置：管理優惠券範本、領取、核銷、計算折扣
+
+server:
+  port: 9008
+  tomcat:
+    threads:
+      max: 40
+      min-spare: 5
+    max-connections: 2000
+    accept-count: 200
+
+# ==================== 業務參數 ====================
+coupon:
+  new-user:
+    template-ids: 1  # 新用戶註冊時自動發放的優惠券範本 ID（對應 coupon_template 表）
+
+spring:
+  config:
+    import:
+      - optional:nacos:application-seata.yml
+  # ==================== 資料庫連線 ====================
+  datasource:
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/mall_coupon?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Taipei&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=256&prepStmtCacheSqlLimit=2048
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:asd1020310231}  # ❗ 此處環境變數名為 DB_PASSWORD，其他服務用 DB_PASS，部署時需注意
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: coupon-hikari
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      leak-detection-threshold: 10000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 3
+          max-wait: 2000ms
+  
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    ssl:
+      enabled: false
+    listener:
+      simple:
+        concurrency: 3
+        max-concurrency: 8
+        prefetch: 10
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://auth-service:9000/oauth2/jwks
+
+seata:
+  service:
+    vgroup-mapping:
+       mall_tx_group: default
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # log-impl 已移除：StdOutImpl 在高併發下嚴重影響效能
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  group-configs:
+    - group: coupon-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.coupon.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.coupon: INFO
+    org.springframework.security: WARN

@@ -1,0 +1,63 @@
+# cart-service.yml
+
+server:
+  port: 11000
+  tomcat:
+    threads:
+      max: 120
+      min-spare: 20
+    max-connections: 3000
+    accept-count: 300
+
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      lettuce:
+        pool:
+          max-active: 80
+          max-idle: 30
+          min-idle: 10
+          max-wait: 2000ms
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    ssl:
+      enabled: false
+
+  # [Perf] Cart 的 Feign 呼叫 (product / promotion) 超時設定
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AUTH_SERVICE_URI:http://auth-service:9000}/oauth2/jwks
+
+springdoc:
+  group-configs:
+    - group: cart-service
+      paths-to-match: "/**"
+      packages-to-scan: com.nameless.mall.cart.controller
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    root: INFO
+    com.nameless.mall.cart: INFO
+    feign.client: INFO

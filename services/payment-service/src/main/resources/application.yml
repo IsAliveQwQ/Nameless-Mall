@@ -1,0 +1,32 @@
+# ============================================
+# payment-service - 本地最小配置。
+# ============================================
+
+spring:
+  application:
+    name: payment-service
+  config:
+    import:
+      - optional:nacos:application.yml
+      - optional:nacos:payment-service.yml
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        file-extension: yml
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+# ECPay Configuration
+ecpay:
+  # 後端回調 (Server-to-Server): 必須指向後端 API
+  callback-url: ${ECPAY_CALLBACK_URL:https://isaliveqwq.me/api/payments/callback/ecpay}
+  # 前端導回 (Client Redirect): 指向 Next.jsCallback 頁面
+  frontend-return-url: ${ECPAY_FRONTEND_RETURN_URL:https://isaliveqwq.me/checkout/callback}
