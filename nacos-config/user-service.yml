@@ -27,6 +27,13 @@ spring:
       max-lifetime: 1800000
       leak-detection-threshold: 10000
 
+  cloud:
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:sentinel:8080}
+        port: 8719
+      web-context-unify: false
+
   # ==================== JWT 資源保護 ====================
   security:
     oauth2:

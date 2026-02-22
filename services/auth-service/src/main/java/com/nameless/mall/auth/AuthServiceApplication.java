@@ -8,7 +8,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 /** 授權服務啟動類 */
 @SpringBootApplication(scanBasePackages = "com.nameless.mall")
 @EnableDiscoveryClient
-@EnableFeignClients
+@EnableFeignClients(basePackages = "com.nameless.mall")
 public class AuthServiceApplication {
 
     public static void main(String[] args) {

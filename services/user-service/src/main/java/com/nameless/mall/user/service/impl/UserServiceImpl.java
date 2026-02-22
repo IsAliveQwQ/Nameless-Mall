@@ -85,7 +85,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 new LambdaQueryWrapper<UserRole>().eq(UserRole::getUserId, user.getId()));
 
         if (CollectionUtils.isEmpty(userRoles)) {
-            return buildUserAuthDTO(user, Collections.emptyList());
+            // 若查無明確角色關聯，則預設給予 USER 權限
+            return buildUserAuthDTO(user, Collections.singletonList("USER"));
         }
 
         List<Long> roleIds = userRoles.stream().map(UserRole::getRoleId).collect(Collectors.toList());
@@ -123,11 +124,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         List<UserRole> userRoles = userRoleMapper.selectList(
                 new LambdaQueryWrapper<UserRole>().eq(UserRole::getUserId, user.getId()));
 
-        List<String> roleNames = Collections.emptyList();
+        List<String> roleNames;
         if (!CollectionUtils.isEmpty(userRoles)) {
             List<Long> roleIds = userRoles.stream().map(UserRole::getRoleId).collect(Collectors.toList());
             List<Role> roles = roleMapper.selectBatchIds(roleIds);
             roleNames = roles.stream().map(Role::getName).collect(Collectors.toList());
+        } else {
+            // 第三方登入新帳號，預設賦予 USER 權限
+            roleNames = Collections.singletonList("USER");
         }
 
         // 6. 組裝認證 DTO 回傳

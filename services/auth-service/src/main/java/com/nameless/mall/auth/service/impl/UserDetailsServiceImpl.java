@@ -1,7 +1,7 @@
 package com.nameless.mall.auth.service.impl;
 
 import com.nameless.mall.auth.entity.SecurityUser;
-import com.nameless.mall.auth.feign.UserServiceFeignClient;
+import com.nameless.mall.user.api.feign.UserServiceFeignClient;
 import com.nameless.mall.core.domain.Result;
 import com.nameless.mall.user.api.dto.UserAuthDTO;
 import lombok.RequiredArgsConstructor;

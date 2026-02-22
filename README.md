@@ -45,6 +45,7 @@ graph TB
 
     subgraph Infrastructure
         Nginx[Nginx]
+        Frontend[Next.js]
         Gateway[Spring Cloud Gateway]
     end
 
@@ -73,8 +74,9 @@ graph TB
         ES[(Elasticsearch)]
     end
 
-    Browser --> Nginx
-    Nginx --> Gateway
+    Browser -- "HTTPS" --> Nginx
+    Nginx -- "/api/*" --> Gateway
+    Nginx -- "/*" --> Frontend
     Gateway --> Services
     Services --> MySQL
     Services --> Redis
@@ -160,9 +162,9 @@ HTTP 狀態碼由 `GlobalExceptionHandler` 自動映射，若未拋出 `Business
 | code | HTTP Status | 說明 |
 |------|-------------|------|
 | `OK` | 200 | 成功 |
-| `INVALID_ARGUMENT` | 400 | 參數驗證失敗 |
+| `INVALID_ARGUMENT` | 400 | 參數無效 |
 | `UNAUTHORIZED` | 401 | 未登入或 Token 失效 |
-| `PRODUCT_NOT_FOUND` | 404 | 查無商品 |
+| `PRODUCT_NOT_FOUND` | 404 | 商品不存在 |
 | `STOCK_INSUFFICIENT` | 400 | 庫存不足 |
 | `SERVICE_UNAVAILABLE` | 503 | 服務暫時無法使用 |
 
@@ -182,6 +184,7 @@ public class GlobalExceptionHandler {
     // 處理業務邏輯例外
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<?>> handleBusinessException(BusinessException ex) {
+        log.warn("【業務例外】code={}, message={}", ex.getCode(), ex.getMessage());
         return new ResponseEntity<>(
             Result.fail(ex.getResultCode(), ex.getMessage()),
             HttpStatus.valueOf(ex.getHttpStatus())
@@ -191,9 +194,11 @@ public class GlobalExceptionHandler {
     // 處理參數驗證例外 (@Valid)
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Result<?>> handleValidationException(MethodArgumentNotValidException ex) {
-        String message = ex.getBindingResult().getFieldError() != null
-            ? ex.getBindingResult().getFieldError().getDefaultMessage()
-            : "參數驗證失敗";
+        String message = "參數驗證失敗";
+        if (ex.getBindingResult().getFieldError() != null) {
+            message = ex.getBindingResult().getFieldError().getDefaultMessage();
+        }
+        log.warn("【參數校驗】MethodArgumentNotValid: {}", message);
         return new ResponseEntity<>(
             Result.fail(ResultCodeEnum.INVALID_ARGUMENT, message),
             HttpStatus.BAD_REQUEST
@@ -202,7 +207,8 @@ public class GlobalExceptionHandler {
 
     // 處理其他未預期例外
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Result<?>> handleException(Exception ex) {
+    public ResponseEntity<Result<?>> handleGlobalException(Exception ex) {
+        log.error("【未捕獲系統例外】...", ex);
         return new ResponseEntity<>(
             Result.fail(ResultCodeEnum.INTERNAL_ERROR, "系統發生錯誤，請稍後重試"),
             HttpStatus.INTERNAL_SERVER_ERROR
@@ -224,7 +230,7 @@ graph LR
         OtherServices -- "4. 回傳 DTO/Result" --> OrderServiceImpl
     end
 
-    OrderServiceImpl -- "5. 存取" --> MySQL[(MySQL DB)]
+    OrderServiceImpl -- "5. 存取" --> MySQL[(MySQL)]
     MySQL -- "6. 映射 Entity" --> OrderServiceImpl
     
     OrderServiceImpl -- "7. 轉換 VO" --> OrderController
@@ -243,23 +249,31 @@ graph LR
 ```java
 // Controller：接收 DTO，回傳 VO
 @PostMapping
-public Result<OrderVO> submitOrder(@Valid @RequestBody OrderSubmitDTO submitDTO) {
-    return Result.ok(orderService.submitOrder(submitDTO));
+@SentinelResource(value = "submitOrder", blockHandler = "submitOrderBlock")
+public Result<OrderVO> submitOrder(@RequestHeader("X-User-Id") Long userId, 
+                                   @Valid @RequestBody OrderSubmitDTO submitDTO) {
+    OrderVO order = orderService.submitOrder(userId, submitDTO);
+    return Result.ok(order, "訂單建立成功");
 }
 
-// Service：同步建立訂單結構 + 觸發非同步處理
+// Service：同步建立訂單骨架，防重複下單，並觸發非同步處理
 @Override
-public OrderVO submitOrder(OrderSubmitDTO submitDTO) {
-    verifyOrderToken(submitDTO.getOrderToken());
+public OrderVO submitOrder(Long userId, OrderSubmitDTO submitDTO) {
+    String orderSn = UUID.randomUUID().toString().replace("-", "");
+    verifyOrderToken(userId, submitDTO.getOrderToken());
     List<CartItemDTO> cartItems = fetchCheckedCartItems(submitDTO.getCartItemIds());
 
-    Order order = buildOrder(submitDTO, cartItems, orderSn);
-    this.save(order); // 狀態：CREATING
+    // 防重複下單：5 分鐘內有 CREATING 訂單則復用
+    Order existingCreating = ... // 省略查詢邏輯
+    if (existingCreating != null) return buildOrderVO(existingCreating);
 
-    // 非同步處理核心邏輯（扣庫存、計價、寫入明細）
+    Order order = buildOrder(userId, submitDTO, cartItems, orderSn);
+    this.save(order);
+
+    // 在獨立執行緒池處理計價與扣庫存，主執行緒快速回傳
     orderAsyncProcessor.processOrderAsync(order.getId(), orderSn, userId, submitDTO, cartItems);
 
-    return buildOrderVO(order); // 快速回傳，前端需輪詢最終結果
+    return buildOrderVO(order);
 }
 ```
 
@@ -283,9 +297,9 @@ sequenceDiagram
     S->>S: save(CREATING)
     S-->>C: 回傳 OrderVO (status=CREATING)
     S->>A: @Async processOrderAsync
-    A->>A: 計算金額 / 運費 / 優惠券
-    A->>P: decreaseStock (Feign 呼叫)
-    A->>T: completeAsyncOrder (@Transactional)
+    A->>A: buildPricingMapFromCart (準備資料)
+    A->>P: CompletableFuture 三路並行扣減(一般/特賣庫存/優惠券)
+    A->>T: completeAsyncOrder (@Transactional 本地交易)
     T->>T: 更新狀態 PENDING_PAYMENT + saveBatch + 寫入 Outbox
     C->>S: GET /orders/{sn}/status (輪詢)
     S-->>C: status=PENDING_PAYMENT
@@ -294,28 +308,39 @@ sequenceDiagram
 **核心代碼實作**：
 
 ```java
-// OrderAsyncProcessor：在獨立執行緒池中處理
+// OrderAsyncProcessor：在獨立執行緒池中並行處理
 @Async("orderAsyncExecutor")
 public void processOrderAsync(Long orderId, String orderSn, Long userId,
-                               OrderSubmitDTO submitDTO, List<CartItemDTO> cartItems) {
+                              OrderSubmitDTO submitDTO, List<CartItemDTO> cartItems) {
+    List<DecreaseStockInputDTO> regularStockList = Collections.emptyList();
+    boolean flashSaleDeducted = false;
     try {
+        // 1. 同步準備與計算
         Map<Long, ProductPriceResultDTO> pricingMap = buildPricingMapFromCart(cartItems);
-        recalculateOrderAmounts(order, cartItems);
-        calculateShipping(order, submitDTO.getShippingMethod());
-        applyCoupon(order, submitDTO, userId);
+        // ... (省略部分本地建構規則)
 
-        // 1. 預扣庫存（Saga 正向操作，交易外執行 Feign）
-        orderTransactionManager.deductFlashSaleStock(order, cartItems, pricingMap);
-        productFeignClient.decreaseStock(regularStockList);
+        // 2. 並行 Feign RPC：coupon 試算 + 特賣扣庫存 + 一般扣庫存
+        CompletableFuture<CouponCalculationResult> couponFuture = ...;
+        CompletableFuture<Void> flashSaleFuture = CompletableFuture.runAsync(
+                () -> orderTransactionManager.deductFlashSaleStock(order, cartItems, pricingMap), feignCallExecutor);
+        CompletableFuture<Void> regularStockFuture = (!stockListForLambda.isEmpty())
+                ? CompletableFuture.runAsync(() -> deductRegularStock(stockListForLambda), feignCallExecutor)
+                : CompletableFuture.completedFuture(null);
 
-        // 2. 本地交易：寫入訂單明細 + Outbox Event
-        orderTransactionManager.completeAsyncOrder(order, orderItems, shipment, ...);
+        // 等待三路全部完成（任一失敗則整體失敗觸發 catch 補償）
+        CompletableFuture.allOf(couponFuture, flashSaleFuture, regularStockFuture).join();
+
+        CouponCalculationResult couponResult = couponFuture.join();
+        applyCouponResult(order, couponResult);
+
+        // 3. 本地交易：寫入訂單明細 + Outbox Event
+        flashSaleDeducted = true;
+        orderTransactionManager.completeAsyncOrder(
+                order, orderItems, shipment, cartItems, pricingMap, submitDTO.getUserCouponId());
 
     } catch (Exception e) {
-        // Saga 補償機制：回補庫存 + 標記訂單為 CREATE_FAILED
-        productFeignClient.increaseStock(regularStockList);
-        orderTransactionManager.revertFlashSaleStockIfAny(orderSn);
-        orderTransactionManager.markOrderFailed(orderId, extractFailReason(e));
+        // Saga 平行補償機制：回補各路資源 + 標記訂單為 CREATE_FAILED
+        compensate(orderId, orderSn, regularStockList, flashSaleDeducted, e);
     }
 }
 
@@ -331,7 +356,8 @@ public void completeAsyncOrder(Order order, List<OrderItem> orderItems,
     orderShipmentService.save(shipment);
 
     // Transactional Outbox：用 DB 交易保證訊息不遺失
-    reliableMessageService.createCouponUseMessage(userCouponId, orderSn);
+    if (userCouponId != null) reliableMessageService.createCouponUseMessage(userCouponId, orderSn);
+    reliableMessageService.createOrderCreatedMessage(order.getId(), productIds);
     reliableMessageService.createOrderDelayMessage(orderSn); // 延遲取消
 }
 ```
@@ -361,6 +387,7 @@ public void cancelOrderInternal(String orderSn) {
 
     // 等待關鍵補償完成
     CompletableFuture.allOf(stockFuture, paymentFuture).join(); 
+    try { couponFuture.join(); } catch (Exception e) {} // 優惠券容錯不阻斷
 }
 ```
 

@@ -39,6 +39,16 @@ public class MarketingCampaignDTO implements Serializable {
     private String description;
 
     /**
+     * 活動期間格式化字串
+     */
+    private String period;
+
+    /**
+     * 活動橫幅圖片路徑
+     */
+    private String imageUrl;
+
+    /**
      * 開始時間
      */
     private LocalDateTime startTime;

@@ -1,4 +1,4 @@
-package com.nameless.mall.auth.feign;
+package com.nameless.mall.user.api.feign;
 
 import com.nameless.mall.core.domain.Result;
 import com.nameless.mall.user.api.dto.SocialUserDTO;

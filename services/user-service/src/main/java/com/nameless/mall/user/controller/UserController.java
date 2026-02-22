@@ -4,6 +4,7 @@ import com.nameless.mall.core.domain.Result;
 import com.nameless.mall.user.api.vo.UserVO;
 import com.nameless.mall.user.api.dto.*;
 import com.nameless.mall.user.service.UserService;
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -29,6 +30,7 @@ public class UserController {
     @Operation(summary = "使用者註冊")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @SentinelResource(value = "user-register")
     public Result<Boolean> register(@Valid @RequestBody UserRegisterDTO registerDTO) {
         boolean isSuccess = userService.register(registerDTO);
         return Result.ok(isSuccess);
@@ -38,6 +40,7 @@ public class UserController {
      * 社交登入（內部 API，僅限 auth-service 呼叫）
      */
     @PostMapping("/internal/social-login")
+    @SentinelResource(value = "user-social-login")
     public Result<UserAuthDTO> findOrCreateBySocial(@RequestBody SocialUserDTO socialUserDTO) {
         return Result.ok(userService.findOrCreateBySocial(socialUserDTO));
     }
