@@ -8,7 +8,7 @@
 
 ## Screenshots
 
-[📸 檢視 UI 畫面預覽](screenshots/)
+[各頁面UI預覽] (screenshots/)
 
 ## 技術堆疊
 
