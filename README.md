@@ -6,6 +6,9 @@
 
 - **前端 Repo**：https://github.com/IsAliveQwQ/Nameless-Mall-Frontend.git
 
+## Screenshots
+
+[📸 檢視 UI 畫面預覽](screenshots/)
 
 ## 技術堆疊
 

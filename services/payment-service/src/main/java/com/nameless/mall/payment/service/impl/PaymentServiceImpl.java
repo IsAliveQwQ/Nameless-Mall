@@ -221,7 +221,8 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentMapper, Payment> impl
         }
 
         // 檢查狀態（快速失敗：為使用者提供明確錯誤訊息）
-        if (!Objects.equals(PaymentStatus.PENDING.getCode(), payment.getStatus())) {
+        if (!Objects.equals(PaymentStatus.PENDING.getCode(), payment.getStatus()) &&
+                !Objects.equals(PaymentStatus.PROCESSING.getCode(), payment.getStatus())) {
             throw new BusinessException(ResultCodeEnum.PAYMENT_STATUS_INVALID, "支付單狀態不允許確認");
         }
 
@@ -232,7 +233,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentMapper, Payment> impl
                         .set(Payment::getPaidAt, LocalDateTime.now())
                         .set(Payment::getAccountInfo, accountInfo)
                         .eq(Payment::getPaymentSn, paymentSn)
-                        .eq(Payment::getStatus, PaymentStatus.PENDING.getCode()));
+                        .in(Payment::getStatus, PaymentStatus.PENDING.getCode(), PaymentStatus.PROCESSING.getCode()));
         if (rows == 0) {
             log.warn("【CAS 競態保護】支付單已被其他線程處理，忽略重複確認: paymentSn={}", paymentSn);
             return;
@@ -260,7 +261,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentMapper, Payment> impl
                 new LambdaUpdateWrapper<Payment>()
                         .set(Payment::getStatus, PaymentStatus.CANCELLED.getCode())
                         .eq(Payment::getOrderSn, orderSn)
-                        .eq(Payment::getStatus, PaymentStatus.PENDING.getCode()));
+                        .in(Payment::getStatus, PaymentStatus.PENDING.getCode(), PaymentStatus.PROCESSING.getCode()));
         if (rows == 0) {
             log.warn("【支付取消】支付單非 PENDING 狀態，跳過取消: orderSn={}", orderSn);
         }
@@ -327,7 +328,8 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentMapper, Payment> impl
                             .set(Payment::getPaidAt, paidAt)
                             .set(Payment::getProviderResponse, result.getProviderResponse())
                             .eq(Payment::getId, payment.getId())
-                            .eq(Payment::getStatus, PaymentStatus.PENDING.getCode()));
+                            .in(Payment::getStatus, PaymentStatus.PENDING.getCode(),
+                                    PaymentStatus.PROCESSING.getCode()));
             if (rows == 0) {
                 log.warn("【CAS 競態保護】支付單已被處理，忽略重複回調: paymentSn={}", payment.getPaymentSn());
                 return PaymentCallbackResult.builder()
@@ -357,7 +359,8 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentMapper, Payment> impl
                         new LambdaUpdateWrapper<Payment>()
                                 .set(Payment::getStatus, result.getStatus().getCode())
                                 .eq(Payment::getId, payment.getId())
-                                .eq(Payment::getStatus, PaymentStatus.PENDING.getCode()));
+                                .in(Payment::getStatus, PaymentStatus.PENDING.getCode(),
+                                        PaymentStatus.PROCESSING.getCode()));
             }
         }
 
