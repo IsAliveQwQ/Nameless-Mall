@@ -8,7 +8,7 @@
 
 ## Screenshots
 
-- **各頁面 UI 預覽圖**：[點擊瀏覽](./screenshots/)
+- **各頁面 UI 預覽圖**：[點擊瀏覽](https://github.com/IsAliveQwQ/Nameless-Mall/tree/main/screenshots)
 
 ## 技術堆疊
 
