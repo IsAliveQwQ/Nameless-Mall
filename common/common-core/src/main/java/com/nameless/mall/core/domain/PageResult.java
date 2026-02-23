@@ -38,6 +38,7 @@ public class PageResult<T> implements Serializable {
 
     /**
      * 當前頁碼 (對應 MyBatis-Plus Page 的 current)
+     * 
      */
     private long current = 1;
 
